@@ -37,19 +37,19 @@ Looking at the Wireshark dissection for the OpenVPN protocol we can see numerous
 
 ![Session ID](https://i.imgur.com/2cEsdyR.png)
 
- The next part of the packet contains an 8 byte long session ID. We can't do much checking with this because it is a random long number, so we'll be skipping over it. 
+ The next part of the packet contains an 8 byte long session ID. This is a random value used to identify the TLS session, and because it is a random value we can't do much with this. It will not be included as en evaluated field for this guide.
  
 ## HMAC
 
 ![HMAC](https://i.imgur.com/UXys8dO.png)
 
-The next part is a 20 byte long HMAC which is essentially an authentication code OpenVPN takes and does something with based on the private key on the server. Again, we can't do much with this so we'll be skipping over it.
+The next part is a 20 (or sometimes 16) byte long value. This field contains the HMAC signature of the encapsulation header and will differ between all clients, so this isn't worth evaluating for this guide.
 
 ## Message ID
 
 ![Message ID](https://i.imgur.com/8cesMCu.png)
 
-Next we have a 4 byte long packet ID starting at offset 37 and is an incremental number identifying the packet sequence. For example, the first packet sent by the client (such as P_CONTROL_HARD_RESET_CLIENT_V2) will have a message ID of 1. This is helpful, because now we know every new packet must contain a 0x01 at the location of the message ID field inside the packet. Since it is 4 bytes long, the packet ID will be preceeded by a bunch of 0 bytes. Our message ID is 0x00000001. This puts our BPF rule at udp[8]=0x38 and udp[37:4]=0x00000001.
+Next we have a 4 byte long message ID starting at offset 37 and is an incremental number identifying the packet sequence and is primarily used for replay protection within OpenVPN. For example, the first packet sent by the client (such as P_CONTROL_HARD_RESET_CLIENT_V2) will have a message ID of 1. This is helpful, because now we know every new packet must contain a 0x01 at the location of the message ID field inside the packet. Since it is 4 bytes long and we're dealing with new connection packets only, the message ID will be preceeded by a number of 0 bytes. Our message ID is 0x00000001. This puts our BPF rule at udp[8]=0x38 and udp[37:4]=0x00000001.
 
 ## Timestamp
 
@@ -59,7 +59,7 @@ The next segment contains a 4 byte long timestamp of the time the packet was sen
 
 > udp[41:4]>=0x5f5e1000
 
-This basically says that the timestamp must be greater than or equal to 1600000000, which is Unix Epoch time and is an ever incrementing number.
+This says that the timestamp must be greater than or equal to 1600000000, which is Unix Epoch time and is an ever incrementing number.
 
 I will not be including this in the final rules for now, but with XDP, some wonderful things would be possible.
 
@@ -67,7 +67,7 @@ I will not be including this in the final rules for now, but with XDP, some wond
 
 ![Array Length](https://i.imgur.com/AZm75PL.png)
 
-Our next segment contains an array length of the packet ID which is the next segment in the packet. Since this is the first packet received, both of these things are set to 0 bytes. This is very similar to the Message ID field in the packet. Knowing this, we can end our BPF filter with udp[45]=0x00 and udp[46:4]=0x00000000.
+Our next segment contains an array length of the packet ID which is 1 byte. Since this is the first packet received, both of these things are set to 0 bytes. This is very similar to the Message ID field in the packet. Knowing this, we can end our BPF filter with udp[45]=0x00 and udp[46:4]=0x00000000.
 
 So far we now have udp[8]=0x38 and udp[37:4]=0x00000001 and udp[45]=0x00 and udp[46:4]=0x00000000 but we should be a little bit more specific. We are using the UDP protocol and our OpenVPN port is 41100, so we should tell iptables BPF to accept packets with that port only as well. Our final BPF filter becomes 
 
